@@ -94,19 +94,19 @@ if not bootAddr then return end
 local fs = component.proxy(bootAddr)
 if not fs then return end
 
-local handle = internet.request("https://raw.githubusercontent.com/KibbeWater/OC-Scripts/refs/heads/main/FileSharing/receive.lua")
+local handle = internet.request("https://raw.githubusercontent.com/KibbeWater/OC-Scripts/refs/heads/main/NoteblockPlayer/player.lua")
 local result = ""
 for chunk in handle do result = result..chunk end
 
-local filename = "_autorunBios"
+local filename = "player"
 local handle = fs.open("/home/"..filename..".lua", "w")
 fs.write(handle, result)
 fs.close(handle)
 
-handle = fs.open("/home/.shrc", "w")
-fs.seek(handle, "end", 0)
-fs.write(handle, "\n"..filename.."\nrm /home/"..filename..".lua")
-fs.close(handle)
+--handle = fs.open("/home/.shrc", "w")
+--fs.seek(handle, "end", 0)
+--fs.write(handle, "\n"..filename.."\nrm /home/"..filename..".lua")
+--fs.close(handle)
 
 ]]
 

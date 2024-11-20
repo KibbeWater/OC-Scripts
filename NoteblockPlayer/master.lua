@@ -1,13 +1,73 @@
-local bbuffer = require("bbuffer")
 local component = require("component")
 local note = require("note")
 local serialization = require("serialization")
 local computer = require("computer")
 local event = require("event")
+local term = require("term")
+local fs = require("filesystem")
+local inet = require("internet")
 
 local m = component.modem
 
-local buf = io.open("yoasobi.nbs")
+function prompt(text)
+  checkArg(1, text, "string")
+
+  print(text)
+  local _in = term.read()
+  return _in
+end
+
+local selection = prompt("Select file option:\n1) Song from URL\n2) File from Disk")
+local selNumber = tonumber(selection)
+if not selNumber or selNumber < 1 or selNumber > 2 then
+  io.stderr:write("Invalid selection")
+  os.exit(1)
+end
+term.clear()
+
+local filePath
+if selNumber == 1 then
+  if not component.isAvailable("internet") then
+    io.stderr:write("Unable to download from URL, no internet module installed")
+    os.exit(1)
+  end
+  local url = prompt("Please provide a URL:")
+  
+  local tmpStream, reason = io.open("/tmp/song.nbs", "wb")
+  if not tmpStream then
+    io.stderr:write("Unable to open file for writing: " .. reason)
+    os.exit(1)
+  end
+
+  print("Downloading file...")
+  local handle = inet.request(url)
+  for _chunk in handle do 
+    tmpStream:write(_chunk)
+  end
+
+  local mt = getmetatable(handle)
+  local code, message, headers = mt.__index.response()
+
+  print("Finished downloading, status code: " .. code)
+  if code ~= 200 then
+    io.stderr:write("Failed to download: " .. message)
+    os.exit(1)
+  end
+  tmpStream:close()
+  filePath = "/tmp/song.nbs"
+elseif selNumber == 2 then
+  filePath = prompt("\nPlease provide a path:")
+else
+  io.stderr:write("Invalid selection")
+  os.exit(1)
+end
+
+if not fs.exists(filePath) then
+  io.stderr:write("File does not exist")
+  os.exit(1)
+end
+
+local buf = io.open(filePath, "rb")
 print("Loaded song, parsing data...")
 
 -- Constants
@@ -54,22 +114,26 @@ function buf:ReadIntString()
   return out
 end
 
+buf:seek("set")
 buf:Skip(2)
 
 local h_iVer = buf:ReadByte()
 if h_iVer ~= 5 then
   io.stderr:write("Incompatible NBS version " .. h_iVer)
+  os.exit(1)
 end
 local h_iInstrumentCount = buf:ReadByte()
 
 local h_iSongLength = buf:ReadShort()
 buf:Skip(2)
 local h_sSongName = buf:ReadIntString()
-local h_sSongAuthor = buf:ReadIntString()
-local h_sSongOrigAuthor = buf:ReadIntString()
-local h_sSongDesc = buf:ReadIntString()
-
 print("Loading " .. h_sSongName .. "...")
+local h_sSongAuthor = buf:ReadIntString()
+print("MIDI song created by " .. h_sSongAuthor)
+local h_sSongOrigAuthor = buf:ReadIntString()
+print("Song created by " .. h_sSongOrigAuthor)
+local h_sSongDesc = buf:ReadIntString()
+print("\n"..h_sSongDesc.."\n")
 
 local h_iTempo = (buf:ReadShort())/100
 buf:Skip(2)
@@ -112,8 +176,6 @@ print("Finished loading song into memory")
 function handleMessage(from, protocol, message)
   if protocol ~= _PROTOCOL then return end
 
-  print("Received PLR packet: " .. message)
-
   local packet = serialization.unserialize(message)
   if packet.type == "HELLO" then
     local player = {addr = from, instruments = packet.instruments}
@@ -139,6 +201,7 @@ if #players == 0 then
   io.stderr:write("No players found")
   os.exit(1)
 end
+print("Found " .. #players .. " players")
 
 for i=1, #players do
   local player = players[i]
