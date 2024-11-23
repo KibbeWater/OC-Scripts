@@ -7,6 +7,7 @@ local thread = require("thread")
 local fs = require("filesystem")
 
 local m = component.modem
+local g = component.gpu
 
 local _PORT = 3001
 local _PROTOCOL = "PLR1"
@@ -100,9 +101,47 @@ function calibrate()
   print("Finished calibration")
 end
 
+function hasPixelChange(progress, oldProgress, width)
+    -- Calculate the pixel positions using integer math
+    local newPixel = math.floor(progress * width + 0.5) -- Round to nearest pixel
+    local oldPixel = math.floor(oldProgress * width + 0.5) -- Round to nearest pixel
+    
+    -- Check if there's a difference in pixel positions
+    return newPixel ~= oldPixel
+end
+
+function render(prog, w, h)
+  if not g then return end
+
+  local f = g.getForeground()
+  local b = g.getBackground()
+
+  g.setBackground(0x000000)
+  g.setForeground(0xFFFFFF)
+  g.fill(1, h, w, h, " ")
+  
+  g.setBackground(0xFFFFFF)
+  g.setForeground(0x000000)
+  g.fill(1, h-1, w, h-1, " ")
+  g.set(2, h-1, "Currently Playing: " .. (songMeta or {}).name .. " - " .. (songMeta or {}).author)
+
+  g.setBackground(0x330000)
+  g.fill(1, h, w*prog, h, " ")
+
+  g.setForeground(f)
+  g.setBackground(b)
+end
+
 function runSong(time)
   local idx = 1
   local lastPitch = {}
+
+  local shouldRerender = true
+  local prog = 0
+  local lastRenderedProg = 0
+
+  local w, h
+  if g ~= nil then w, h = g.getResolution() end
   while true do
     local note = notes[idx]
     if not note then break end
@@ -113,9 +152,16 @@ function runSong(time)
       goto continue 
     end
 
+    if hasPixelChange(prog, lastRenderedProg, w) then shouldRerender = true end
+
     -- Is it time to play
     repeat
-      os.sleep(0.01)
+      if shouldRerender then
+        prog = idx / #notes
+        render(prog, w, h)
+        lastRenderedProg = prog
+        shouldRerender = false
+      else os.sleep(0.01) end
     until time + note.t <= computer.uptime()
 
     noteblock.trigger(note.p)

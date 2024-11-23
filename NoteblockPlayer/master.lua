@@ -17,6 +17,9 @@ function prompt(text)
   return _in
 end
 
+local swapPath = "/tmp/nbs_swap-"
+if fs.exists("/swap") then swapPath = "/swap/nbs_swap-" end
+
 local selection = prompt("Select file option:\n1) Song from URL\n2) File from Disk")
 local selNumber = tonumber(selection)
 if not selNumber or selNumber < 1 or selNumber > 2 then
@@ -24,6 +27,27 @@ if not selNumber or selNumber < 1 or selNumber > 2 then
   os.exit(1)
 end
 term.clear()
+
+function math.clamp(x, min, max)
+    if x < min then return min end
+    if x > max then return max end
+    return x
+end
+
+-- URL parsing functions
+function transformGoogleDriveUrl(url)
+    -- Match the Google Drive URL structure
+    local drivePattern = "https://drive%.google%.com/file/d/([%w%-_]+)/view%?usp=drive_link"
+    local fileId = url:match(drivePattern)
+    
+    -- If the URL matches, transform it to the desired format
+    if fileId then
+        return string.format("https://drive.usercontent.google.com/u/0/uc?id=%s&export=download", fileId)
+    else
+        -- Return the original URL if it's not a matching Google Drive URL
+        return url
+    end
+end
 
 local filePath
 if selNumber == 1 then
@@ -38,6 +62,8 @@ if selNumber == 1 then
     io.stderr:write("Unable to open file for writing: " .. reason)
     os.exit(1)
   end
+
+  url = transformGoogleDriveUrl(url)
 
   print("Downloading file...")
   local handle = inet.request(url)
@@ -56,14 +82,14 @@ if selNumber == 1 then
   tmpStream:close()
   filePath = "/tmp/song.nbs"
 elseif selNumber == 2 then
-  filePath = prompt("\nPlease provide a path:")
+  filePath = prompt("Please provide a path:"):gsub("\n", "")
 else
   io.stderr:write("Invalid selection")
   os.exit(1)
 end
 
 if not fs.exists(filePath) then
-  io.stderr:write("File does not exist")
+  io.stderr:write("File \"" .. filePath .. "\" does not exist")
   os.exit(1)
 end
 
@@ -146,13 +172,15 @@ buf:Skip(4)
 local notes = {}
 local players = {}
 
+local swapCount = 1
+local swapFile, reason = io.open(swapPath .. swapCount, "w")
+if not swapFile then io.stderr:write("Error opening swap file: " .. reason) end
+
 local tickCounter = 0
 local noteCount = 0
 while true do
   local tickToNext = buf:ReadShort()
   if tickToNext == 0 then break end
-
-  if noteCount%100 == 0 then os.sleep(0.01) end
 
   noteCount = noteCount + 1
   tickCounter = tickCounter + tickToNext
@@ -163,15 +191,33 @@ while true do
     local _note = {}
     _note.i = buf:ReadByte() -- Instrument
     local pitch = buf:ReadByte()-33
-    if pitch < 1 or pitch > 23 then pitch = 1 end
+    pitch = math.clamp(pitch, 1, 24)
     _note.p = pitch --note.ticks(buf:ReadByte()+34) -- Pitch
     _note.t = t
     table.insert(notes, _note)
     buf:Skip(4)
+
+    if #notes%1000 == 0 then
+      os.sleep(0.01)
+
+      local s = serialization.serialize(notes)
+      swapFile:write(s)
+      swapFile:close()
+      notes = {}
+      swapCount = swapCount + 1
+      swapFile, reason = io.open(swapPath .. swapCount, "w")
+      if not swapFile then io.stderr:write("Error opening swap file: " .. reason) end
+      print("Wrote to swap " .. (swapCount - 1))
+    end    
   end
 end
 
-print("Finished loading song into memory")
+local sc = serialization.serialize(notes)
+swapFile:write(sc)
+swapFile:close()
+notes = {}
+
+print("Finished loading song into memory, note count: " .. noteCount)
 
 function handleMessage(from, protocol, message)
   if protocol ~= _PROTOCOL then return end
@@ -206,6 +252,7 @@ print("Found " .. #players .. " players")
 for i=1, #players do
   local player = players[i]
   if not player then break end
+
   m.send(player.addr, _PORT, _PROTOCOL, serialization.serialize(
     {
       type = "METADATA",
@@ -233,45 +280,58 @@ end
 
 for i=1, #players do playerNotes[players[i].addr] = {} end
 
-for i=1, #notes do
-  local note = notes[i]
-  local plr
-  if note.t <= lastTime+0.1 then plr = players[nextPlayer()] else plr = players[plrIdx] end
-  if not plr then break end
+for y=1, swapCount do
+  local handle = io.open(swapPath..y, "r")
+  local content = handle:read("*a")
+  notes = serialization.unserialize(content) or {}
+  content = ""
+  handle:close()
 
-  table.insert(playerNotes[plr.addr], note)
-  lastTime=note.t
-end
+  print("Reading swap " .. y .. " of size " .. #notes)
 
-for addr,n in pairs(playerNotes) do
-  local chunks = {}
-  local chunkSize = 20
+  for i=1, #notes do
+    local note = notes[i]
+    local plr
+    if note.t <= lastTime+0.1 then plr = players[nextPlayer()] else plr = players[plrIdx] end
+    if not plr then break end
 
-  local idx = 1
-  local max = #n
-  local nBuf = {}
-  while true do
-    if idx > max then 
-      table.insert(chunks, nBuf) 
-      break
-    end
+    table.insert(playerNotes[plr.addr], note)
+    lastTime=note.t
+  end
 
-    table.insert(nBuf, n[idx])
+  for addr,n in pairs(playerNotes) do
+    local chunks = {}
+    local chunkSize = 20
+
+    local idx = 1
+    local max = #n
+    local nBuf = {}
+    while true do
+      if idx > max then 
+        table.insert(chunks, nBuf) 
+        break
+      end
+
+      table.insert(nBuf, n[idx])
     
-    if idx%chunkSize == 0 then
-      table.insert(chunks, nBuf)
-      nBuf = {}
+      if idx%chunkSize == 0 then
+        table.insert(chunks, nBuf)
+        nBuf = {}
+      end
+      idx = idx + 1
     end
-    idx = idx + 1
+
+    for i=1, #chunks do
+      m.send(addr, _PORT, _PROTOCOL, serialization.serialize(
+        {type="NOTES",notes=chunks[i]}
+      ))
+    end
   end
 
-  print("Sending " .. #chunks .. " chunks to " .. addr)
-
-  for i=1, #chunks do
-    m.send(addr, _PORT, _PROTOCOL, serialization.serialize(
-      {type="NOTES",notes=chunks[i]}
-    ))
-  end
+  -- Clear memory
+  for k in pairs(playerNotes) do
+    playerNotes[k] = {}
+  end  
 end
 
 print("Sent all payloads, playing in 3s")
