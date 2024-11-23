@@ -143,6 +143,7 @@ function runSong(time)
   local w, h
   if g ~= nil then w, h = g.getResolution() end
   while true do
+    prog = idx/#notes    
     local note = notes[idx]
     if not note then break end
 
@@ -157,7 +158,6 @@ function runSong(time)
     -- Is it time to play
     repeat
       if shouldRerender then
-        prog = idx / #notes
         render(prog, w, h)
         lastRenderedProg = prog
         shouldRerender = false
