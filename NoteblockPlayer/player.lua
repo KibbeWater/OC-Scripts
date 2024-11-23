@@ -41,6 +41,12 @@ function printInstruments()
   print("7 = Bell (Block of Gold)")
   print("8 = Chime (Packed Ice)")
   print("9 = Xylophone (Bone Block)")
+  print("10 = Iron Xylophone (Iron Block)")
+  print("11 = Cow Bell (Soul Sand)")
+  print("12 = Didgeridoo (Pumpkin)")
+  print("13 = Bit (Block of Emerald)")
+  print("14 = Banjo (Hay)")
+  print("15 = Pling (Glowstone)")
 end
 
 function loadCalibration()
@@ -71,7 +77,7 @@ function calibrate()
     print("\nPlease pick instrument:")
     while true do
       local input = tonumber(term.read()) or -1
-      if input < 0 or input > 9 then
+      if input < 0 or input > 15 then
         print("Invalid instrument")
         goto continue
       end
