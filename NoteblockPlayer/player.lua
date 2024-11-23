@@ -109,27 +109,21 @@ function runSong(time)
 
     local noteblock = instruments[note.i]
     if not noteblock then 
-      os.sleep(0.01) -- Prevent errors by not yielding
+      os.sleep(0) -- Prevent errors by not yielding
       goto continue 
     end
 
-    local cPitch = lastPitch[note.i]
-    local dPitch = note.p
-    if cPitch ~= dPitch then 
-      lastPitch[note.i] = dPitch
-      noteblock.setPitch(dPitch) 
-    end
-    
     -- Is it time to play
     repeat
       os.sleep(0.01)
     until time + note.t <= computer.uptime()
 
-    noteblock.trigger()
-    idx = idx + 1
+    noteblock.trigger(note.p)
 
     ::continue::
+    idx = idx + 1
   end
+  print("Finished playing")
   notes = nil
   songMeta = nil
 end
